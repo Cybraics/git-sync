@@ -436,15 +436,15 @@ func sendNotification() {
 	delay := 10
 	for i := 1; i <= 10; i++ {
 		err := sendNotificationAttempt()
-		if err != nil {
-			log.V(2).Infof("successfully sent notification webhook")
+		if err == nil {
+			log.V(0).Infof("successfully sent notification webhook")
 			return
 		}
 		log.V(1).Infof("err %v sending webhook: retrying webhook in %d seconds", err, delay)
 		time.Sleep(time.Duration(delay) * time.Second)
 		delay = int(float64(delay) * 1.5)
 	}
-	log.V(1).Infof("permanently failing webhook attempt after max tries")
+	log.V(0).Infof("permanently failing webhook attempt after max tries")
 }
 
 func sendNotificationAttempt() error {
