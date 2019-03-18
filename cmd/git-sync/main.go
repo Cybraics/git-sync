@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -71,6 +72,12 @@ var flSSHKnownHosts = flag.Bool("ssh-known-hosts", envBool("GIT_KNOWN_HOSTS", tr
 
 var flCookieFile = flag.Bool("cookie-file", envBool("GIT_COOKIE_FILE", false),
 	"use git cookiefile")
+
+var flWebhookURL = flag.String("webhook-url", envString("WEBHOOK_URL", ""),
+	"webhook url to notify on update")
+
+var flWebhookMethod = flag.String("webhook-method", envString("WEBHOOK_METHOD", "POST"),
+	"method to use with webhook notification url")
 
 var log = newLoggerOrDie()
 
@@ -410,7 +417,50 @@ func syncRepo(repo, branch, rev string, depth int, gitRoot, dest string) error {
 		}
 	}
 
-	return addWorktreeAndSwap(gitRoot, dest, branch, rev, hash)
+	res := addWorktreeAndSwap(gitRoot, dest, branch, rev, hash)
+
+	if res == nil {
+		go sendNotification()
+	}
+
+	return res
+}
+
+// send notification to webhook, if defined. back off exponentially
+// starting at 10 seconds
+func sendNotification() {
+	if *flWebhookMethod == "" {
+		return
+	}
+
+	delay := 10
+	for i := 1; i <= 10; i++ {
+		err := sendNotificationAttempt()
+		if err == nil {
+			log.V(0).Infof("successfully sent notification webhook")
+			return
+		}
+		log.V(1).Infof("err %v sending webhook: retrying webhook in %d seconds", err, delay)
+		time.Sleep(time.Duration(delay) * time.Second)
+		delay = int(float64(delay) * 1.5)
+	}
+	log.V(0).Infof("permanently failing webhook attempt after max tries")
+}
+
+func sendNotificationAttempt() error {
+	req, err := http.NewRequest(*flWebhookMethod, *flWebhookURL, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if !(resp.StatusCode >= 200 && resp.StatusCode <= 299) {
+		return fmt.Errorf("received response code %d - expected 200", resp.StatusCode)
+	}
+	return nil
 }
 
 // getRevs returns the local and upstream hashes for rev.
